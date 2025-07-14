@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>抽獎小工具</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/umd/lucide.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.js"></script>
+    <style>
+        @import url('https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css');
+        
+        .perspective-1000 {
+            perspective: 1000px;
+        }
+        
+        @keyframes bounce {
+            0%, 20%, 53%, 80%, 100% {
+                transform: translate3d(0,0,0);
+            }
+            40%, 43% {
+                transform: translate3d(0,-30px,0);
+            }
+            70% {
+                transform: translate3d(0,-15px,0);
+            }
+            90% {
+                transform: translate3d(0,-4px,0);
+            }
+        }
+        
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: .5;
+            }
+        }
+        
+        .animate-bounce {
+            animation: bounce 1s infinite;
+        }
+        
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+        
+        .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const { Play, Pause, RotateCcw, Plus, Trash2, Upload, Download, Settings, Users, Trophy, Volume2, VolumeX } = lucide;
+
+        const LotteryTool = () => {
+            const [participants, setParticipants] = useState([]);
+            const [newParticipant, setNewParticipant] = useState('');
+            const [prizes, setPrizes] = useState([
+                { id: 1, name: '一等獎', count: 1, winners: [] },
+                { id: 2, name: '二等獎', count: 2, winners: [] },
+                { id: 3, name: '三等獎', count: 3, winners: [] }
+            ]);
+            const [currentPrize, setCurrentPrize] = useState(0);
+            const [isDrawing, setIsDrawing] = useState(false);
+            const [currentDisplay, setCurrentDisplay] = useState('');
+            const [drawingSpeed, setDrawingSpeed] = useState(100);
+            const [allowDuplicate, setAllowDuplicate] = useState(false);
+            const [soundEnabled, setSoundEnabled] = useState(true);
+            const [drawMode, setDrawMode] = useState('scroll');
+            const [showSettings, setShowSettings] = useState(false);
+            const [animationAngle, setAnimationAngle] = useState(0);
+            
+            const intervalRef = useRef(null);
+
+            const playSound = (type) => {
+                if (!soundEnabled) return;
+                
+                try {
+                    const context = new (window.AudioContext || window.webkitAudioContext)();
+                    const oscillator = context.createOscillator();
+                    const gainNode = context.createGain();
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(context.destination);
+                    
+                    if (type === 'tick') {
+                        oscillator.frequency.value = 800;
+                        gainNode.gain.value = 0.1;
+                        oscillator.start();
+                        oscillator.stop(context.currentTime + 0.1);
+                    } else if (type === 'win') {
+                        oscillator.frequency.value = 1000;
+                        gainNode.gain.value = 0.3;
+                        oscillator.start();
+                        oscillator.stop(context.currentTime + 0.5);
+                    }
+                } catch (e) {
+                    console.log('Audio not supported');
+                }
+            };
+
+            const addParticipant = () => {
+                if (newParticipant.trim() && !participants.includes(newParticipant.trim())) {
+                    setParticipants([...participants, newParticipant.trim()]);
+                    setNewParticipant('');
+                }
+            };
+
+            const handleBatchAdd = (text) => {
+                const names = text.split('\n').map(name => name.trim()).filter(name => name);
+                const uniqueNames = [...new Set([...participants, ...names])];
+                setParticipants(uniqueNames);
+            };
+
+            const removeParticipant = (name) => {
+                setParticipants(participants.filter(p => p !== name));
+            };
+
+            const getAvailableParticipants = () => {
+                if (allowDuplicate) return participants;
+                
+                const allWinners = prizes.flatMap(prize => prize.winners);
+                return participants.filter(p => !allWinners.includes(p));
+            };
+
+            const startDrawing = () => {
+                const availableParticipants = getAvailableParticipants();
+                if (availableParticipants.length === 0) {
+                    alert('沒有可用的參與者！');
+                    return;
+                }
+
+                const currentPrizeData = prizes[currentPrize];
+                if (currentPrizeData.winners.length >= currentPrizeData.count) {
+                    alert('此獎項已抽完！');
+                    return;
+                }
+
+                setIsDrawing(true);
+                
+                intervalRef.current = setInterval(() => {
+                    const randomIndex = Math.floor(Math.random() * availableParticipants.length);
+                    setCurrentDisplay(availableParticipants[randomIndex]);
+                    
+                    if (drawMode === 'wheel') {
+                        setAnimationAngle(prev => prev + 30);
+                    }
+                    
+                    playSound('tick');
+                }, drawingSpeed);
+            };
+
+            const stopDrawing = () => {
+                if (intervalRef.current) {
+                    clearInterval(intervalRef.current);
+                    intervalRef.current = null;
+                }
+                
+                setIsDrawing(false);
+                
+                if (currentDisplay) {
+                    const updatedPrizes = [...prizes];
+                    updatedPrizes[currentPrize].winners.push(currentDisplay);
+                    setPrizes(updatedPrizes);
+                    playSound('win');
+                }
+            };
+
+            const resetLottery = () => {
+                if (intervalRef.current) {
+                    clearInterval(intervalRef.current);
+                    intervalRef.current = null;
+                }
+                
+                setIsDrawing(false);
+                setCurrentDisplay('');
+                setCurrentPrize(0);
+                setPrizes(prizes.map(prize => ({ ...prize, winners: [] })));
+            };
+
+            const exportResults = () => {
+                const results = prizes.map(prize => ({
+                    獎項: prize.name,
+                    中獎者: prize.winners.join(', ')
+                }));
+                
+                const csvContent = "data:text/csv;charset=utf-8," + 
+                    "獎項,中獎者\n" + 
+                    results.map(r => `${r.獎項},"${r.中獎者}"`).join('\n');
+                
+                const link = document.createElement('a');
+                link.setAttribute('href', encodeURI(csvContent));
+                link.setAttribute('download', '抽獎結果.csv');
+                link.click();
+            };
+
+            const renderDrawingArea = () => {
+                const baseClasses = "min-h-96 rounded-xl border-4 border-dashed border-blue-300 flex items-center justify-center text-6xl font-bold transition-all duration-300";
+                
+                if (drawMode === 'scroll') {
+                    return React.createElement('div', {
+                        className: `${baseClasses} ${isDrawing ? 'bg-gradient-to-r from-blue-400 to-purple-500 text-white animate-pulse' : 'bg-gray-50 text-gray-400'}`
+                    }, React.createElement('div', {
+                        className: isDrawing ? 'animate-bounce' : ''
+                    }, currentDisplay || '點擊開始抽獎'));
+                }
+                
+                if (drawMode === 'wheel') {
+                    return React.createElement('div', {
+                        className: `${baseClasses} relative overflow-hidden`
+                    }, [
+                        React.createElement('div', {
+                            key: 'wheel',
+                            className: `w-80 h-80 rounded-full border-8 border-yellow-400 bg-gradient-to-br from-yellow-200 to-orange-300 flex items-center justify-center text-4xl font-bold transition-transform duration-100 ${isDrawing ? 'animate-spin' : ''}`,
+                            style: { transform: `rotate(${animationAngle}deg)` }
+                        }, React.createElement('div', {
+                            className: 'text-center'
+                        }, currentDisplay || '準備抽獎')),
+                        React.createElement('div', {
+                            key: 'pointer',
+                            className: 'absolute top-4 left-1/2 transform -translate-x-1/2 w-6 h-6 bg-red-500 rounded-full shadow-lg'
+                        })
+                    ]);
+                }
+                
+                if (drawMode === 'card') {
+                    return React.createElement('div', {
+                        className: `${baseClasses} perspective-1000`
+                    }, React.createElement('div', {
+                        className: `w-80 h-48 bg-gradient-to-br from-purple-400 to-pink-500 rounded-xl shadow-2xl flex items-center justify-center text-white ${isDrawing ? 'animate-pulse' : ''}`
+                    }, React.createElement('div', {
+                        className: 'text-center'
+                    }, currentDisplay || '翻牌抽獎')));
+                }
+            };
+
+            useEffect(() => {
+                return () => {
+                    if (intervalRef.current) {
+                        clearInterval(intervalRef.current);
+                    }
+                };
+            }, []);
+
+            return React.createElement('div', {
+                className: 'min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 p-4'
+            }, React.createElement('div', {
+                className: 'max-w-7xl mx-auto'
+            }, [
+                // Header
+                React.createElement('header', {
+                    key: 'header',
+                    className: 'text-center mb-8'
+                }, [
+                    React.createElement('h1', {
+                        key: 'title',
+                        className: 'text-4xl font-bold text-gray-800 mb-2'
+                    }, '🎲 抽獎小工具'),
+                    React.createElement('p', {
+                        key: 'subtitle',
+                        className: 'text-gray-600'
+                    }, '簡單易用的網頁版抽獎系統')
+                ]),
+                
+                // Main content
+                React.createElement('div', {
+                    key: 'main',
+                    className: 'grid grid-cols-1 lg:grid-cols-3 gap-6'
+                }, [
+                    // 參與者管理
+                    React.createElement('div', {
+                        key: 'participants',
+                        className: 'bg-white rounded-xl shadow-lg p-6'
+                    }, [
+                        React.createElement('div', {
+                            key: 'header',
+                            className: 'flex items-center justify-between mb-4'
+                        }, [
+                            React.createElement('h2', {
+                                key: 'title',
+                                className: 'text-xl font-semibold text-gray-800 flex items-center'
+                            }, [
+                                React.createElement(Users, { key: 'icon', className: 'mr-2', size: 20 }),
+                                '參與者管理'
+                            ]),
+                            React.createElement('span', {
+                                key: 'count',
+                                className: 'bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium'
+                            }, `${participants.length} 人`)
+                        ]),
+                        
+                        React.createElement('div', {
+                            key: 'content',
+                            className: 'space-y-4'
+                        }, [
+                            React.createElement('div', {
+                                key: 'add-form',
+                                className: 'flex gap-2'
+                            }, [
+                                React.createElement('input', {
+                                    key: 'input',
+                                    type: 'text',
+                                    value: newParticipant,
+                                    onChange: (e) => setNewParticipant(e.target.value),
+                                    onKeyPress: (e) => e.key === 'Enter' && addParticipant(),
+                                    placeholder: '輸入參與者姓名',
+                                    className: 'flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
+                                }),
+                                React.createElement('button', {
+                                    key: 'add-btn',
+                                    onClick: addParticipant,
+                                    className: 'px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors'
+                                }, React.createElement(Plus, { size: 16 }))
+                            ]),
+                            
+                            React.createElement('div', {
+                                key: 'batch-add'
+                            }, React.createElement('textarea', {
+                                placeholder: '批量添加（每行一個姓名）',
+                                onChange: (e) => handleBatchAdd(e.target.value),
+                                className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-20'
+                            })),
+                            
+                            React.createElement('div', {
+                                key: 'participant-list',
+                                className: 'max-h-60 overflow-y-auto space-y-2'
+                            }, participants.map((name, index) => 
+                                React.createElement('div', {
+                                    key: index,
+                                    className: 'flex items-center justify-between bg-gray-50 px-3 py-2 rounded-lg'
+                                }, [
+                                    React.createElement('span', {
+                                        key: 'name',
+                                        className: 'text-sm text-gray-700'
+                                    }, name),
+                                    React.createElement('button', {
+                                        key: 'delete',
+                                        onClick: () => removeParticipant(name),
+                                        className: 'text-red-500 hover:text-red-700 transition-colors'
+                                    }, React.createElement(Trash2, { size: 14 }))
+                                ])
+                            ))
+                        ])
+                    ]),
+
+                    // 抽獎區域
+                    React.createElement('div', {
+                        key: 'drawing',
+                        className: 'bg-white rounded-xl shadow-lg p-6'
+                    }, [
+                        React.createElement('div', {
+                            key: 'header',
+                            className: 'flex items-center justify-between mb-4'
+                        }, [
+                            React.createElement('h2', {
+                                key: 'title',
+                                className: 'text-xl font-semibold text-gray-800'
+                            }, prizes[currentPrize]?.name || '抽獎區域'),
+                            React.createElement('div', {
+                                key: 'controls',
+                                className: 'flex items-center gap-2'
+                            }, [
+                                React.createElement('select', {
+                                    key: 'mode-select',
+                                    value: drawMode,
+                                    onChange: (e) => setDrawMode(e.target.value),
+                                    className: 'px-3 py-1 border border-gray-300 rounded-lg text-sm'
+                                }, [
+                                    React.createElement('option', { key: 'scroll', value: 'scroll' }, '滾動模式'),
+                                    React.createElement('option', { key: 'wheel', value: 'wheel' }, '轉盤模式'),
+                                    React.createElement('option', { key: 'card', value: 'card' }, '卡片模式')
+                                ]),
+                                React.createElement('button', {
+                                    key: 'settings-btn',
+                                    onClick: () => setShowSettings(!showSettings),
+                                    className: 'p-2 text-gray-500 hover:text-gray-700 transition-colors'
+                                }, React.createElement(Settings, { size: 16 }))
+                            ])
+                        ]),
+
+                        showSettings && React.createElement('div', {
+                            key: 'settings',
+                            className: 'mb-4 p-4 bg-gray-50 rounded-lg space-y-3'
+                        }, [
+                            React.createElement('div', {
+                                key: 'speed',
+                                className: 'flex items-center justify-between'
+                            }, [
+                                React.createElement('label', {
+                                    key: 'label',
+                                    className: 'text-sm font-medium text-gray-700'
+                                }, '抽獎速度'),
+                                React.createElement('input', {
+                                    key: 'input',
+                                    type: 'range',
+                                    min: '50',
+                                    max: '300',
+                                    value: drawingSpeed,
+                                    onChange: (e) => setDrawingSpeed(Number(e.target.value)),
+                                    className: 'w-24'
+                                })
+                            ]),
+                            React.createElement('div', {
+                                key: 'duplicate',
+                                className: 'flex items-center justify-between'
+                            }, [
+                                React.createElement('label', {
+                                    key: 'label',
+                                    className: 'text-sm font-medium text-gray-700'
+                                }, '允許重複中獎'),
+                                React.createElement('input', {
+                                    key: 'input',
+                                    type: 'checkbox',
+                                    checked: allowDuplicate,
+                                    onChange: (e) => setAllowDuplicate(e.target.checked),
+                                    className: 'rounded'
+                                })
+                            ]),
+                            React.createElement('div', {
+                                key: 'sound',
+                                className: 'flex items-center justify-between'
+                            }, [
+                                React.createElement('label', {
+                                    key: 'label',
+                                    className: 'text-sm font-medium text-gray-700'
+                                }, '音效'),
+                                React.createElement('button', {
+                                    key: 'button',
+                                    onClick: () => setSoundEnabled(!soundEnabled),
+                                    className: 'p-1 text-gray-500 hover:text-gray-700'
+                                }, React.createElement(soundEnabled ? Volume2 : VolumeX, { size: 16 }))
+                            ])
+                        ]),
+
+                        renderDrawingArea(),
+
+                        React.createElement('div', {
+                            key: 'buttons',
+                            className: 'mt-6 flex gap-2'
+                        }, [
+                            React.createElement('button', {
+                                key: 'start-stop',
+                                onClick: isDrawing ? stopDrawing : startDrawing,
+                                disabled: participants.length === 0,
+                                className: `flex-1 px-4 py-3 rounded-lg font-medium transition-colors flex items-center justify-center ${
+                                    isDrawing
+                                        ? 'bg-red-500 text-white hover:bg-red-600'
+                                        : 'bg-green-500 text-white hover:bg-green-600'
+                                } disabled:bg-gray-300 disabled:cursor-not-allowed`
+                            }, [
+                                React.createElement(isDrawing ? Pause : Play, { key: 'icon', className: 'mr-2', size: 16 }),
+                                isDrawing ? '停止' : '開始'
+                            ]),
+                            React.createElement('button', {
+                                key: 'reset',
+                                onClick: resetLottery,
+                                className: 'px-4 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors'
+                            }, React.createElement(RotateCcw, { size: 16 }))
+                        ])
+                    ]),
+
+                    // 獎項和結果
+                    React.createElement('div', {
+                        key: 'prizes',
+                        className: 'bg-white rounded-xl shadow-lg p-6'
+                    }, [
+                        React.createElement('div', {
+                            key: 'header',
+                            className: 'flex items-center justify-between mb-4'
+                        }, [
+                            React.createElement('h2', {
+                                key: 'title',
+                                className: 'text-xl font-semibold text-gray-800 flex items-center'
+                            }, [
+                                React.createElement(Trophy, { key: 'icon', className: 'mr-2', size: 20 }),
+                                '獎項設定'
+                            ]),
+                            React.createElement('button', {
+                                key: 'export',
+                                onClick: exportResults,
+                                className: 'px-3 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm flex items-center'
+                            }, [
+                                React.createElement(Download, { key: 'icon', size: 14, className: 'mr-1' }),
+                                '匯出'
+                            ])
+                        ]),
+
+                        React.createElement('div', {
+                            key: 'content',
+                            className: 'space-y-4'
+                        }, [
+                            ...prizes.map((prize, index) => 
+                                React.createElement('div', {
+                                    key: prize.id,
+                                    className: 'border border-gray-200 rounded-lg p-4'
+                                }, [
+                                    React.createElement('div', {
+                                        key: 'header',
+                                        className: 'flex items-center justify-between mb-2'
+                                    }, React.createElement('div', {
+                                        className: 'flex items-center gap-2'
+                                    }, [
+                                        React.createElement('button', {
+                                            key: 'select',
+                                            onClick: () => setCurrentPrize(index),
+                                            className: `px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                                                currentPrize === index
+                                                    ? 'bg-blue-500 text-white'
+                                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                            }`
+                                        }, prize.name),
+                                        React.createElement('span', {
+                                            key: 'count',
+                                            className: 'text-sm text-gray-500'
+                                        }, `${prize.winners.length}/${prize.count}`)
+                                    ])),
+                                    
+                                    prize.winners.length > 0 && React.createElement('div', {
+                                        key: 'winners',
+                                        className: 'mt-2'
+                                    }, [
+                                        React.createElement('div', {
+                                            key: 'label',
+                                            className: 'text-sm font-medium text-gray-700 mb-1'
+                                        }, '中獎者：'),
+                                        React.createElement('div', {
+                                            key: 'list',
+                                            className: 'flex flex-wrap gap-1'
+                                        }, prize.winners.map((winner, idx) => 
+                                            React.createElement('span', {
+                                                key: idx,
+                                                className: 'px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm'
+                                            }, winner)
+                                        ))
+                                    ])
+                                ])
+                            ),
+
+                            React.createElement('div', {
+                                key: 'stats',
+                                className: 'mt-6 text-sm text-gray-500'
+                            }, [
+                                React.createElement('div', { key: 'total' }, `總參與者: ${participants.length}`),
+                                React.createElement('div', { key: 'available' }, `可用參與者: ${getAvailableParticipants().length}`),
+                                React.createElement('div', { key: 'winners' }, `已中獎: ${prizes.flatMap(p => p.winners).length}`)
+                            ])
+                        ])
+                    ])
+                ])
+            ]));
+        };
+
+        ReactDOM.render(React.createElement(LotteryTool), document.getElementById('root'));
+    </script>
+</body>
+</html>
